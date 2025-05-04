@@ -1,85 +1,181 @@
 import os
+import argparse
 import pandas as pd
 from PIL import Image
+import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as transforms
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 
-# ----------------------------
-# Dataset
-# ----------------------------
-class SpectrogramDataset(Dataset):
-    def __init__(self, csv_file, root_dir, transform=None):
-        self.annotations = pd.read_csv(csv_file)
-        self.root_dir = root_dir
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Train and evaluate a CNN on the ESC-50 dataset using spectrogram images"
+    )
+    parser.add_argument(
+        "--data-dir", type=str, default=".",
+        help="Root directory of ESC-50 (contains 'meta' and 'spectrograms')"
+    )
+    parser.add_argument(
+        "--fold", type=int, default=1,
+        help="Which fold to use as test (1-5)"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=32,
+        help="Batch size for training and evaluation"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=20,
+        help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--lr", type=float, default=1e-3,
+        help="Learning rate"
+    )
+    parser.add_argument(
+        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to train on"
+    )
+    return parser.parse_args()
+
+
+class ESC50Dataset(Dataset):
+    def __init__(self, meta_csv, spectrogram_dir, folds, transform=None):
+        self.meta = pd.read_csv(meta_csv)
+        self.meta = self.meta[self.meta.fold.isin(folds)]
+        self.spect_dir = spectrogram_dir
         self.transform = transform
 
     def __len__(self):
-        return len(self.annotations)
+        return len(self.meta)
 
     def __getitem__(self, idx):
-        filename = self.annotations.iloc[idx, 0]
-        label = self.annotations.iloc[idx, 2]  # 'target'
-        img_name = os.path.splitext(filename)[0] + "_spectrogram.png"
-        img_path = os.path.join(self.root_dir, img_name)
+        row = self.meta.iloc[idx]
+        fname = row.filename.replace('.wav', '_spectrogram.png')
+        img_path = os.path.join(self.spect_dir, fname)
         image = Image.open(img_path).convert('RGB')
-
         if self.transform:
             image = self.transform(image)
-
+        label = int(row.target)
         return image, label
 
-# ----------------------------
-# Model
-# ----------------------------
+
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes=50):
         super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
-        self.fc1 = nn.Linear(32 * 56 * 56, 256)
-        self.fc2 = nn.Linear(256, num_classes)
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128 *  (64//8) * (173//8), 256),  # adjust based on input size
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes)
+        )
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))  # -> [B, 16, 112, 112]
-        x = self.pool(F.relu(self.conv2(x)))  # -> [B, 32, 56, 56]
-        x = x.view(-1, 32 * 56 * 56)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = self.features(x)
+        x = self.classifier(x)
         return x
 
-# ----------------------------
-# Main Training Function
-# ----------------------------
+
+def train_one_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    for imgs, labels in loader:
+        imgs, labels = imgs.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(imgs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * imgs.size(0)
+        _, preds = outputs.max(1)
+        correct += preds.eq(labels).sum().item()
+        total += imgs.size(0)
+    return running_loss / total, correct / total
+
+
+def evaluate(model, loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for imgs, labels in loader:
+            imgs, labels = imgs.to(device), labels.to(device)
+            outputs = model(imgs)
+            loss = criterion(outputs, labels)
+            running_loss += loss.item() * imgs.size(0)
+            _, preds = outputs.max(1)
+            correct += preds.eq(labels).sum().item()
+            total += imgs.size(0)
+    return running_loss / total, correct / total
+
+
 def main():
-    CSV_PATH = 'meta/esc50.csv'
-    IMG_DIR = 'spectrograms'
+    args = parse_args()
+
+    # Paths
+    meta_csv = os.path.join(args.data_dir, 'meta', 'esc50.csv')
+    spect_dir = os.path.join(args.data_dir, 'spectrograms')
+
+    # Train folds = all except test fold
+    train_folds = [f for f in range(1, 6) if f != args.fold]
+    val_fold = args.fold
 
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((64, 173)),
         transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
-    dataset = SpectrogramDataset(CSV_PATH, IMG_DIR, transform)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform)
+    val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform)
 
-    model = SimpleCNN(num_classes=50)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+
+    device = torch.device(args.device)
+    model = SimpleCNN(num_classes=50).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    for epoch in range(10):
-        for images, labels in dataloader:
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+    best_acc = 0.0
+    for epoch in range(1, args.epochs + 1):
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+        print(f"Epoch {epoch}/{args.epochs} - "
+              f"Train loss: {train_loss:.4f}, Train acc: {train_acc:.4f} - "
+              f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f}")
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        # Save best model
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth"))
 
-        print(f'Epoch {epoch+1}, Loss: {loss.item():.4f}')
+    print(f"Training complete. Best validation accuracy: {best_acc:.4f}")
+
+    # Final test on validation fold
+    print("Evaluating best model on test fold...")
+    model.load_state_dict(torch.load(os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth")))
+    test_loss, test_acc = evaluate(model, val_loader, criterion, device)
+    print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}")
+
 
 if __name__ == '__main__':
     main()
