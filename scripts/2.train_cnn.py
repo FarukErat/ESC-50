@@ -44,7 +44,7 @@ def parse_args():
 class ESC50Dataset(Dataset):
     def __init__(self, meta_csv, spectrogram_dir, folds, transform=None):
         self.meta = pd.read_csv(meta_csv)
-        self.meta = self.meta[self.meta.fold.isin(folds)]
+        self.meta = self.meta[self.meta.fold.isin(folds)].reset_index(drop=True)
         self.spect_dir = spectrogram_dir
         self.transform = transform
 
@@ -76,9 +76,10 @@ class SimpleCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
+        # Note: input size 64x173 -> after 3 poolings: 8x21
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 *  (64//8) * (173//8), 256),  # adjust based on input size
+            nn.Linear(128 * 8 * 21, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.5),
             nn.Linear(256, num_classes)
@@ -127,14 +128,35 @@ def evaluate(model, loader, criterion, device):
     return running_loss / total, correct / total
 
 
+def per_class_accuracy(model, loader, device, num_classes):
+    model.eval()
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
+    with torch.no_grad():
+        for imgs, labels in loader:
+            imgs, labels = imgs.to(device), labels.to(device)
+            outputs = model(imgs)
+            _, preds = outputs.max(1)
+            for label, pred in zip(labels, preds):
+                class_total[label.item()] += 1
+                if label == pred:
+                    class_correct[label.item()] += 1
+    acc_dict = {i: class_correct[i] / class_total[i] if class_total[i] > 0 else 0.0 for i in range(num_classes)}
+    return acc_dict
+
+
+def load_label_map(meta_csv):
+    df = pd.read_csv(meta_csv)
+    label_map = df[['target', 'category']].drop_duplicates().set_index('target')['category'].to_dict()
+    return label_map
+
+
 def main():
     args = parse_args()
 
-    # Paths
     meta_csv = os.path.join(args.data_dir, 'meta', 'esc50.csv')
     spect_dir = os.path.join(args.data_dir, 'spectrograms')
 
-    # Train folds = all except test fold
     train_folds = [f for f in range(1, 6) if f != args.fold]
     val_fold = args.fold
 
@@ -163,19 +185,25 @@ def main():
               f"Train loss: {train_loss:.4f}, Train acc: {train_acc:.4f} - "
               f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f}")
 
-        # Save best model
         if val_acc > best_acc:
             best_acc = val_acc
             torch.save(model.state_dict(), os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth"))
 
     print(f"Training complete. Best validation accuracy: {best_acc:.4f}")
 
-    # Final test on validation fold
     print("Evaluating best model on test fold...")
     model.load_state_dict(torch.load(os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth")))
     test_loss, test_acc = evaluate(model, val_loader, criterion, device)
-    print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}")
+    print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}\n")
 
+    # Per-category accuracy sorted descending
+    print("Per-class accuracy (sorted descending):")
+    acc_dict = per_class_accuracy(model, val_loader, device, num_classes=50)
+    label_map = load_label_map(meta_csv)
+    # Sort by accuracy value descending
+    for idx, acc in sorted(acc_dict.items(), key=lambda x: x[1], reverse=True):
+        category = label_map.get(idx, f"Class {idx}")
+        print(f"  {idx:02d} - {category:20s}: {acc:.4f}")
 
 if __name__ == '__main__':
     main()
