@@ -1,19 +1,21 @@
-import pandas as pd
 import os
+import csv
 
-df = pd.read_csv('meta/esc50.csv')
-
+csv_file = 'meta/esc50.csv'
 audio_folder = 'audio'
 
-for _, row in df.iterrows():
-    original_name = row['filename']
-    new_name = f"{row['category']}_{row['src_file']}.wav"
+with open(csv_file, newline='') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        original_filename = row['filename']
+        category = row['category']
+        new_filename = f"{category}_{original_filename}"
 
-    src_path = os.path.join(audio_folder, original_name)
-    dst_path = os.path.join(audio_folder, new_name)
+        src = os.path.join(audio_folder, original_filename)
+        dst = os.path.join(audio_folder, new_filename)
 
-    if os.path.exists(src_path):
-        os.rename(src_path, dst_path)
-        print(f"Renamed: {original_name} → {new_name}")
-    else:
-        print(f"File not found: {original_name}")
+        if os.path.exists(src):
+            os.rename(src, dst)
+            print(f"Renamed: {original_filename} → {new_filename}")
+        else:
+            print(f"File not found: {original_filename}")
