@@ -178,7 +178,7 @@ def main():
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
         scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch}/{args.epochs} - "
+        print(f"Epoch {epoch}/{epochs} - "
               f"Train loss: {train_loss:.4f}, Train acc: {train_acc:.4f} - "
               f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f} - "
               f"Learning Rate: {current_lr:.6f}")
