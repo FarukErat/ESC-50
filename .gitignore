@@ -4,3 +4,4 @@
 *.pyc
 .venv/
 best_model_fold*
+best_model_fold1.pth

@@ -6,9 +6,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision import transforms
 
+Num_Classes = 50
+fold = 1
+epochs = 50
+batch_size = 64
 
 class ESC50Dataset(Dataset):
     def __init__(self, meta_csv, spectrogram_dir, folds, transform=None, selected_classes=None):
@@ -27,9 +31,16 @@ class ESC50Dataset(Dataset):
         return len(self.meta)
 
     def __getitem__(self, idx):
+        if idx >= len(self.meta):
+            raise IndexError(f"Index {idx} out of bounds for dataset of size {len(self.meta)}")
+        
         row = self.meta.iloc[idx]
         fname = row.filename.replace('.wav', '_spectrogram.png')
         img_path = os.path.join(self.spect_dir, fname)
+        
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"File not found: {img_path}")
+        
         image = Image.open(img_path).convert('RGB')
         if self.transform:
             image = self.transform(image)
@@ -38,24 +49,33 @@ class ESC50Dataset(Dataset):
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=50):
         super(SimpleCNN, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2),
+            #nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
+            nn.Dropout(0.2),
+
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2),
+            #nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
+            nn.Dropout(0.2),
+
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2),
+            #nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
+            nn.Dropout(0.2),
         )
         # Updated input size for the first Linear layer
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(128 * 16 * 43, 256),  # Adjusted input size
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.2),
+            #nn.ReLU(inplace=True),
             nn.Dropout(0.6),
             nn.Linear(256, num_classes)
         )
@@ -74,7 +94,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     for imgs, labels in loader:
         imgs, labels = imgs.to(device), labels.to(device)
         optimizer.zero_grad()
-        outputs = model(imgs)
+        outputs = model(imgs.to(device))
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -130,30 +150,32 @@ def load_label_map(meta_csv, selected_classes):
 
 
 def main():
-    batch_size = 32
 
     meta_csv = os.path.join('meta', 'esc50.csv')
     spect_dir = os.path.join('mel_spectrograms')
 
     selected_class_names = [
-        "can_opening", "siren", "crying_baby", "frog", "sea_waves",
-        "crickets", "thunderstorm", "brushing_teeth", "door_wood_knock", "clock_alarm"
-    ]
+        'dog' 'chirping_birds' 'vacuum_cleaner' 'thunderstorm' 'door_wood_knock'
+        'can_opening' 'crow' 'clapping' 'fireworks' 'chainsaw' 'airplane'
+        'mouse_click' 'pouring_water' 'train' 'sheep' 'water_drops'
+        'church_bells' 'clock_alarm' 'keyboard_typing' 'wind' 'footsteps' 'frog'
+        'cow' 'brushing_teeth' 'car_horn' 'crackling_fire' 'helicopter'
+        'drinking_sipping' 'rain' 'insects' 'laughing' 'hen' 'engine' 'breathing'
+        'crying_baby' 'hand_saw' 'coughing' 'glass_breaking' 'snoring'
+        'toilet_flush' 'pig' 'washing_machine' 'clock_tick' 'sneezing' 'rooster'
+        'sea_waves' 'siren' 'cat' 'door_wood_creaks' 'crickets']
 
     df = pd.read_csv(meta_csv)
-    df = df[df['category'].isin(selected_class_names)]
+    #df = df[df['category'].isin(selected_class_names)]
     selected_targets = sorted(df['target'].unique())
     target_to_new_idx = {old: new for new, old in enumerate(selected_targets)}
     category_map = {target_to_new_idx[row.target]: row.category for _, row in df.iterrows() if row.target in selected_targets}
-
-    fold = 1
-    epochs = 20
 
     train_folds = [f for f in range(1, 6) if f != fold]
     val_fold = fold
 
     transform = transforms.Compose([
-        transforms.Resize((64*2, 173*2)),
+        transforms.Resize((128, 346)),  # Double the size
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
@@ -165,12 +187,10 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SimpleCNN(num_classes=10).to(device)
+    model = SimpleCNN(num_classes=Num_Classes).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CyclicLR(
-    optimizer, base_lr=1e-5, max_lr=1e-3, step_size_up=10, mode='triangular'
-)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.0002)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, min_lr=1e-5, cooldown=2)
 
     best_acc = 0.0
     for epoch in range(1, epochs + 1):
@@ -195,7 +215,7 @@ def main():
     print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}\n")
 
     print("Per-class accuracy (sorted descending):")
-    acc_dict = per_class_accuracy(model, val_loader, device, num_classes=10)
+    acc_dict = per_class_accuracy(model, val_loader, device, num_classes=Num_Classes)
     for idx, acc in sorted(acc_dict.items(), key=lambda x: x[1], reverse=True):
         category = category_map.get(idx, f"Class {idx}")
         print(f"  {idx:02d} - {category:20s}: {acc:.4f}")
