@@ -10,17 +10,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train and evaluate a CNN on 10 ESC-50 classes using spectrogram images")
-    parser.add_argument("--data-dir", type=str, default=".", help="Root directory of ESC-50 (contains 'meta' and 'spectrograms')")
-    parser.add_argument("--fold", type=int, default=1, help="Which fold to use as test (1-5)")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training and evaluation")
-    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to train on")
-    return parser.parse_args()
-
-
 class ESC50Dataset(Dataset):
     def __init__(self, meta_csv, spectrogram_dir, folds, transform=None, selected_classes=None):
         self.meta = pd.read_csv(meta_csv)
@@ -140,10 +129,10 @@ def load_label_map(meta_csv, selected_classes):
 
 
 def main():
-    args = parse_args()
+    batch_size = 32
 
-    meta_csv = os.path.join(args.data_dir, 'meta', 'esc50.csv')
-    spect_dir = os.path.join(args.data_dir, 'mel_spectrograms')
+    meta_csv = os.path.join('meta', 'esc50.csv')
+    spect_dir = os.path.join('mel_spectrograms')
 
     selected_class_names = [
         "can_opening", "siren", "crying_baby", "frog", "sea_waves",
@@ -156,8 +145,11 @@ def main():
     target_to_new_idx = {old: new for new, old in enumerate(selected_targets)}
     category_map = {target_to_new_idx[row.target]: row.category for _, row in df.iterrows() if row.target in selected_targets}
 
-    train_folds = [f for f in range(1, 6) if f != args.fold]
-    val_fold = args.fold
+    fold = 1
+    epochs = 20
+
+    train_folds = [f for f in range(1, 6) if f != fold]
+    val_fold = fold
 
     transform = transforms.Compose([
         transforms.Resize((64, 173)),
@@ -168,30 +160,30 @@ def main():
     train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform, selected_classes=selected_targets)
     val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform, selected_classes=selected_targets)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
-    device = torch.device(args.device)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SimpleCNN(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
     best_acc = 0.0
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
-        print(f"Epoch {epoch}/{args.epochs} - "
+        print(f"Epoch {epoch}/{epochs} - "
               f"Train loss: {train_loss:.4f}, Train acc: {train_acc:.4f} - "
               f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f}")
 
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth"))
+            torch.save(model.state_dict(), os.path.join(f"best_model_fold{fold}.pth"))
 
     print(f"Training complete. Best validation accuracy: {best_acc:.4f}")
 
     print("Evaluating best model on test fold...")
-    model.load_state_dict(torch.load(os.path.join(args.data_dir, f"best_model_fold{args.fold}.pth")))
+    model.load_state_dict(torch.load(os.path.join(f"best_model_fold{fold}.pth")))
     test_loss, test_acc = evaluate(model, val_loader, criterion, device)
     print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}\n")
 
