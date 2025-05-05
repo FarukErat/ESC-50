@@ -133,8 +133,9 @@ def per_class_accuracy(model, loader, device, num_classes):
 def load_label_map(meta_csv, selected_classes):
     df = pd.read_csv(meta_csv)
     df = df[df.target.isin(selected_classes)]
-    df = df[['target', 'category']].drop_duplicates().sort_values(by='target')
-    mapping = {i: cat for i, cat in enumerate(df['category'].tolist())}
+    df = df[['target', 'category']].drop_duplicates()
+    target_to_new_idx = {orig: new for new, orig in enumerate(sorted(selected_classes))}
+    mapping = {target_to_new_idx[row.target]: row.category for _, row in df.iterrows()}
     return mapping
 
 
@@ -142,9 +143,18 @@ def main():
     args = parse_args()
 
     meta_csv = os.path.join(args.data_dir, 'meta', 'esc50.csv')
-    spect_dir = os.path.join(args.data_dir, 'spectrograms')
+    spect_dir = os.path.join(args.data_dir, 'mel_spectrograms')
 
-    selected_classes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # change this if you want other 10 classes
+    selected_class_names = [
+        "can_opening", "siren", "crying_baby", "frog", "sea_waves",
+        "crickets", "thunderstorm", "brushing_teeth", "door_wood_knock", "clock_alarm"
+    ]
+
+    df = pd.read_csv(meta_csv)
+    df = df[df['category'].isin(selected_class_names)]
+    selected_targets = sorted(df['target'].unique())
+    target_to_new_idx = {old: new for new, old in enumerate(selected_targets)}
+    category_map = {target_to_new_idx[row.target]: row.category for _, row in df.iterrows() if row.target in selected_targets}
 
     train_folds = [f for f in range(1, 6) if f != args.fold]
     val_fold = args.fold
@@ -155,8 +165,8 @@ def main():
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
-    train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform, selected_classes=selected_classes)
-    val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform, selected_classes=selected_classes)
+    train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform, selected_classes=selected_targets)
+    val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform, selected_classes=selected_targets)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
@@ -187,9 +197,8 @@ def main():
 
     print("Per-class accuracy (sorted descending):")
     acc_dict = per_class_accuracy(model, val_loader, device, num_classes=10)
-    label_map = load_label_map(meta_csv, selected_classes)
     for idx, acc in sorted(acc_dict.items(), key=lambda x: x[1], reverse=True):
-        category = label_map.get(idx, f"Class {idx}")
+        category = category_map.get(idx, f"Class {idx}")
         print(f"  {idx:02d} - {category:20s}: {acc:.4f}")
 
 
