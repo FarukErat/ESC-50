@@ -109,7 +109,7 @@ model.compile(
 # Train the model
 history = model.fit(
     train_generator,
-    epochs=50,
+    epochs=20,
     validation_data=val_generator
 )
 
