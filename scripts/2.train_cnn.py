@@ -51,11 +51,12 @@ class SimpleCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
+        # Updated input size for the first Linear layer
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 * 8 * 21, 256),
+            nn.Linear(128 * 16 * 43, 256),  # Adjusted input size
             nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
             nn.Linear(256, num_classes)
         )
 
@@ -152,7 +153,7 @@ def main():
     val_fold = fold
 
     transform = transforms.Compose([
-        transforms.Resize((64, 173)),
+        transforms.Resize((64*2, 173*2)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
@@ -166,15 +167,21 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SimpleCNN(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CyclicLR(
+    optimizer, base_lr=1e-5, max_lr=1e-3, step_size_up=10, mode='triangular'
+)
 
     best_acc = 0.0
     for epoch in range(1, epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = evaluate(model, val_loader, criterion, device)
-        print(f"Epoch {epoch}/{epochs} - "
+        scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch}/{args.epochs} - "
               f"Train loss: {train_loss:.4f}, Train acc: {train_acc:.4f} - "
-              f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f}")
+              f"Val loss: {val_loss:.4f}, Val acc: {val_acc:.4f} - "
+              f"Learning Rate: {current_lr:.6f}")
 
         if val_acc > best_acc:
             best_acc = val_acc
