@@ -2,3 +2,5 @@
 
 .ipynb_checkpoints
 *.pyc
+.venv/
+best_model_fold*
