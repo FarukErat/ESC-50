@@ -1,0 +1,35 @@
+Epoch 1/20 - Train loss: 2.1610, Train acc: 0.2094 - Val loss: 1.6781, Val acc: 0.3500
+Epoch 2/20 - Train loss: 1.4686, Train acc: 0.4875 - Val loss: 1.0054, Val acc: 0.6875
+Epoch 3/20 - Train loss: 1.1214, Train acc: 0.6250 - Val loss: 0.8567, Val acc: 0.7125
+Epoch 4/20 - Train loss: 0.8449, Train acc: 0.7281 - Val loss: 0.6502, Val acc: 0.7750
+Epoch 5/20 - Train loss: 0.7165, Train acc: 0.7844 - Val loss: 0.5267, Val acc: 0.8500
+Epoch 6/20 - Train loss: 0.5363, Train acc: 0.8156 - Val loss: 0.4804, Val acc: 0.8000
+Epoch 7/20 - Train loss: 0.3855, Train acc: 0.8719 - Val loss: 0.4136, Val acc: 0.8750
+Epoch 8/20 - Train loss: 0.2916, Train acc: 0.8781 - Val loss: 0.4150, Val acc: 0.8375
+Epoch 9/20 - Train loss: 0.2318, Train acc: 0.9219 - Val loss: 0.3751, Val acc: 0.8500
+Epoch 10/20 - Train loss: 0.1754, Train acc: 0.9469 - Val loss: 0.4066, Val acc: 0.8375
+Epoch 11/20 - Train loss: 0.1445, Train acc: 0.9531 - Val loss: 0.4127, Val acc: 0.8625
+Epoch 12/20 - Train loss: 0.0962, Train acc: 0.9750 - Val loss: 0.2909, Val acc: 0.8875
+Epoch 13/20 - Train loss: 0.1128, Train acc: 0.9625 - Val loss: 0.2902, Val acc: 0.8875
+Epoch 14/20 - Train loss: 0.0758, Train acc: 0.9781 - Val loss: 0.3933, Val acc: 0.8500
+Epoch 15/20 - Train loss: 0.0859, Train acc: 0.9625 - Val loss: 0.3236, Val acc: 0.9000
+Epoch 16/20 - Train loss: 0.0387, Train acc: 0.9875 - Val loss: 0.4346, Val acc: 0.8750
+Epoch 17/20 - Train loss: 0.0523, Train acc: 0.9906 - Val loss: 0.4927, Val acc: 0.8625
+Epoch 18/20 - Train loss: 0.0728, Train acc: 0.9812 - Val loss: 0.2930, Val acc: 0.9000
+Epoch 19/20 - Train loss: 0.0432, Train acc: 0.9812 - Val loss: 0.3975, Val acc: 0.8750
+Epoch 20/20 - Train loss: 0.0321, Train acc: 0.9938 - Val loss: 0.3064, Val acc: 0.9250
+Training complete. Best validation accuracy: 0.9250
+Evaluating best model on test fold...
+Test loss: 0.3064, Test accuracy: 0.9250
+
+Per-class accuracy (sorted descending):
+  01 - sea_waves           : 1.0000
+  02 - crickets            : 1.0000
+  03 - thunderstorm        : 1.0000
+  04 - crying_baby         : 1.0000
+  07 - can_opening         : 1.0000
+  09 - siren               : 1.0000
+  00 - frog                : 0.8750
+  06 - door_wood_knock     : 0.8750
+  05 - brushing_teeth      : 0.7500
+  08 - clock_alarm         : 0.7500
