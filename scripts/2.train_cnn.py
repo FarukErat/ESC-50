@@ -11,40 +11,26 @@ from torchvision import transforms
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Train and evaluate a CNN on the ESC-50 dataset using spectrogram images"
-    )
-    parser.add_argument(
-        "--data-dir", type=str, default=".",
-        help="Root directory of ESC-50 (contains 'meta' and 'spectrograms')"
-    )
-    parser.add_argument(
-        "--fold", type=int, default=1,
-        help="Which fold to use as test (1-5)"
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=32,
-        help="Batch size for training and evaluation"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=20,
-        help="Number of training epochs"
-    )
-    parser.add_argument(
-        "--lr", type=float, default=1e-3,
-        help="Learning rate"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to train on"
-    )
+    parser = argparse.ArgumentParser(description="Train and evaluate a CNN on 10 ESC-50 classes using spectrogram images")
+    parser.add_argument("--data-dir", type=str, default=".", help="Root directory of ESC-50 (contains 'meta' and 'spectrograms')")
+    parser.add_argument("--fold", type=int, default=1, help="Which fold to use as test (1-5)")
+    parser.add_argument("--batch-size", type=int, default=32, help="Batch size for training and evaluation")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to train on")
     return parser.parse_args()
 
 
 class ESC50Dataset(Dataset):
-    def __init__(self, meta_csv, spectrogram_dir, folds, transform=None):
+    def __init__(self, meta_csv, spectrogram_dir, folds, transform=None, selected_classes=None):
         self.meta = pd.read_csv(meta_csv)
-        self.meta = self.meta[self.meta.fold.isin(folds)].reset_index(drop=True)
+        self.meta = self.meta[self.meta.fold.isin(folds)]
+
+        if selected_classes is not None:
+            self.meta = self.meta[self.meta.target.isin(selected_classes)].reset_index(drop=True)
+            target_mapping = {orig: new for new, orig in enumerate(sorted(selected_classes))}
+            self.meta['target'] = self.meta['target'].map(target_mapping)
+
         self.spect_dir = spectrogram_dir
         self.transform = transform
 
@@ -63,7 +49,7 @@ class ESC50Dataset(Dataset):
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_classes=50):
+    def __init__(self, num_classes=10):
         super(SimpleCNN, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
@@ -76,7 +62,6 @@ class SimpleCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
         )
-        # Note: input size 64x173 -> after 3 poolings: 8x21
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Linear(128 * 8 * 21, 256),
@@ -145,10 +130,12 @@ def per_class_accuracy(model, loader, device, num_classes):
     return acc_dict
 
 
-def load_label_map(meta_csv):
+def load_label_map(meta_csv, selected_classes):
     df = pd.read_csv(meta_csv)
-    label_map = df[['target', 'category']].drop_duplicates().set_index('target')['category'].to_dict()
-    return label_map
+    df = df[df.target.isin(selected_classes)]
+    df = df[['target', 'category']].drop_duplicates().sort_values(by='target')
+    mapping = {i: cat for i, cat in enumerate(df['category'].tolist())}
+    return mapping
 
 
 def main():
@@ -156,6 +143,8 @@ def main():
 
     meta_csv = os.path.join(args.data_dir, 'meta', 'esc50.csv')
     spect_dir = os.path.join(args.data_dir, 'spectrograms')
+
+    selected_classes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # change this if you want other 10 classes
 
     train_folds = [f for f in range(1, 6) if f != args.fold]
     val_fold = args.fold
@@ -166,14 +155,14 @@ def main():
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
-    train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform)
-    val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform)
+    train_dataset = ESC50Dataset(meta_csv, spect_dir, train_folds, transform, selected_classes=selected_classes)
+    val_dataset = ESC50Dataset(meta_csv, spect_dir, [val_fold], transform, selected_classes=selected_classes)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
 
     device = torch.device(args.device)
-    model = SimpleCNN(num_classes=50).to(device)
+    model = SimpleCNN(num_classes=10).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
@@ -196,14 +185,13 @@ def main():
     test_loss, test_acc = evaluate(model, val_loader, criterion, device)
     print(f"Test loss: {test_loss:.4f}, Test accuracy: {test_acc:.4f}\n")
 
-    # Per-category accuracy sorted descending
     print("Per-class accuracy (sorted descending):")
-    acc_dict = per_class_accuracy(model, val_loader, device, num_classes=50)
-    label_map = load_label_map(meta_csv)
-    # Sort by accuracy value descending
+    acc_dict = per_class_accuracy(model, val_loader, device, num_classes=10)
+    label_map = load_label_map(meta_csv, selected_classes)
     for idx, acc in sorted(acc_dict.items(), key=lambda x: x[1], reverse=True):
         category = label_map.get(idx, f"Class {idx}")
         print(f"  {idx:02d} - {category:20s}: {acc:.4f}")
+
 
 if __name__ == '__main__':
     main()
