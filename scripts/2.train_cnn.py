@@ -323,10 +323,8 @@ def main():
     val_fold = fold
     train_transform = transforms.Compose([
         transforms.Resize((128, 346)),
-        # Example: Add some image-based augmentation (use cautiously on spectrograms)
-        # transforms.RandomAffine(degrees=0, translate=(0.1, 0)), # Example: Random horizontal shift
         transforms.ToTensor(),
-        transforms.RandomErasing(p=0.5, scale=(0.02, 0.1), ratio=(0.1, 1.0), value=0), # <--- ADD Augmentation HERE
+        #transforms.RandomErasing(p=0.5, scale=(0.02, 0.1), ratio=(0.1, 1.0), value=0), # <--- ADD Augmentation HERE
         transforms.Normalize(mean=[0.5, 0.5], std=[0.5, 0.5]) 
     ])
     val_transform = transforms.Compose([
@@ -356,7 +354,7 @@ def main():
         patience=3, 
         min_lr=1e-6
     )
-    
+
     best_acc = 0.0
     output_dir = "." # Define where to save the model
     os.makedirs(output_dir, exist_ok=True) # Ensure output directory exists
