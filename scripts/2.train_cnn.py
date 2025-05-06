@@ -98,35 +98,35 @@ class ImprovedCNN(nn.Module):
         super(ImprovedCNN, self).__init__()
         
         self.initial = nn.Sequential(
-            nn.Conv2d(2, 32, kernel_size=7, stride=2, padding=3),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(2, 64, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(64),
             nn.GELU()
         )
         
         self.layer1 = nn.Sequential(
-            ResidualBlock(32, 32),
-            ResidualBlock(32, 32),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.2)
-        )
-        
-        self.layer2 = nn.Sequential(
-            ResidualBlock(32, 64, stride=1),
+            ResidualBlock(64, 64),
             ResidualBlock(64, 64),
             nn.MaxPool2d(2),
             nn.Dropout(0.2)
         )
         
-        self.layer3 = nn.Sequential(
+        self.layer2 = nn.Sequential(
             ResidualBlock(64, 128, stride=1),
             ResidualBlock(128, 128),
+            nn.MaxPool2d(2),
+            nn.Dropout(0.2)
+        )
+        
+        self.layer3 = nn.Sequential(
+            ResidualBlock(128, 256, stride=1),
+            ResidualBlock(256, 256),
             nn.MaxPool2d(2),
             nn.Dropout(0.3)
         )
         
         self.layer4 = nn.Sequential(
-            ResidualBlock(128, 256, stride=1),
-            ResidualBlock(256, 256),
+            ResidualBlock(256, 512, stride=1),
+            ResidualBlock(512, 512),
             nn.MaxPool2d(2),
             nn.Dropout(0.4)
         )
@@ -136,15 +136,15 @@ class ImprovedCNN(nn.Module):
         
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(256, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(512, 1024),
+            nn.BatchNorm1d(1024),
             nn.GELU(),
             nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
             nn.GELU(),
             nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
+            nn.Linear(512, num_classes)
         )
 
     def forward(self, x):
@@ -349,13 +349,14 @@ def main():
     summary(model, (2, 128, 346))
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.0005)
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
-        T_0=10, 
-        T_mult=2, 
-        eta_min=1e-6
+        mode='min', 
+        factor=0.5, 
+        patience=3, 
+        min_lr=1e-6
     )
-
+    
     best_acc = 0.0
     output_dir = "." # Define where to save the model
     os.makedirs(output_dir, exist_ok=True) # Ensure output directory exists
